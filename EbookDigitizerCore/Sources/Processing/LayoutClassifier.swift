@@ -30,16 +30,33 @@ public struct LayoutHeuristics: Sendable {
     /// considered meaningful (avoids flagging narrow gaps from line spacing).
     public var illustrationMinWidthRatio: CGFloat
 
+    /// Fraction of the body text width by which a line must be indented (relative
+    /// to the body's left edge) to be classified as a `blockquote`.
+    public var blockquoteIndentRatio: CGFloat
+
+    /// Maximum character count for a body line to be considered a heading.
+    public var headingMaxChars: Int
+
+    /// Vertical gap above a heading, as a fraction of page height, that signals
+    /// a section break (helps disambiguate short paragraphs from headings).
+    public var headingGapRatio: CGFloat
+
     public init(
         headerFooterBandRatio: CGFloat = 0.06,
         marginaliaGutterRatio: CGFloat = 0.08,
         illustrationMinGapRatio: CGFloat = 0.08,
-        illustrationMinWidthRatio: CGFloat = 0.60
+        illustrationMinWidthRatio: CGFloat = 0.60,
+        blockquoteIndentRatio: CGFloat = 0.06,
+        headingMaxChars: Int = 60,
+        headingGapRatio: CGFloat = 0.02
     ) {
         self.headerFooterBandRatio = headerFooterBandRatio
         self.marginaliaGutterRatio = marginaliaGutterRatio
         self.illustrationMinGapRatio = illustrationMinGapRatio
         self.illustrationMinWidthRatio = illustrationMinWidthRatio
+        self.blockquoteIndentRatio = blockquoteIndentRatio
+        self.headingMaxChars = headingMaxChars
+        self.headingGapRatio = headingGapRatio
     }
 }
 
@@ -79,7 +96,7 @@ struct LayoutClassifier {
 
     let heuristics: LayoutHeuristics
 
-    init(heuristics: LayoutHeuristics = .init()) {
+    public init(heuristics: LayoutHeuristics = .init()) {
         self.heuristics = heuristics
     }
 
@@ -88,7 +105,7 @@ struct LayoutClassifier {
     /// Vision's normalized space has its origin at the **bottom-left**, so:
     /// - "Top band" (headers) is `y > (1 - band)`.
     /// - "Bottom band" (footers/page numbers) is `y < band`.
-    func classify(_ observations: PageObservations) -> [DetectedBlock] {
+    public func classify(_ observations: PageObservations) -> [DetectedBlock] {
         guard !observations.textBlocks.isEmpty else {
             return illustrationGaps(amongst: [], pageRect: observations.pageRect)
         }
@@ -102,11 +119,21 @@ struct LayoutClassifier {
             return lhs.boundingRect.minX < rhs.boundingRect.minX
         }
 
+        // Compute the body column bounds (the dominant text x-extent) once, so
+        // heading/blockquote heuristics can compare against it.
+        let bodyBounds = bodyColumnBounds(of: ordered, in: observations.pageRect)
+
         var classified: [DetectedBlock] = []
         var sequence = 0
 
-        for text in ordered {
-            let blockType = type(for: text.boundingRect, in: observations.pageRect)
+        for (index, text) in ordered.enumerated() {
+            let blockType = refineType(
+                for: text.boundingRect,
+                transcript: text.transcript,
+                in: observations.pageRect,
+                bodyBounds: bodyBounds,
+                previous: classified.last
+            )
 
             classified.append(DetectedBlock(
                 sequence: sequence,
@@ -115,6 +142,7 @@ struct LayoutClassifier {
                 confidence: text.confidence,
                 boundingRect: text.boundingRect
             ))
+            _ = index
             sequence += 1
         }
 
@@ -140,25 +168,69 @@ struct LayoutClassifier {
 
     // MARK: - Classification
 
+    /// Coarse zone classification (artifact / marginalia / body).
     private func type(for rect: CGRect, in pageRect: CGRect) -> BlockType {
         let band = heuristics.headerFooterBandRatio * pageRect.height
         let midY = rect.midY
         let gutter = heuristics.marginaliaGutterRatio * pageRect.width
         let midX = rect.midX
 
-        // Top band: running headers.
-        if midY > pageRect.maxY - band {
-            return .pageArtifact
-        }
-        // Bottom band: footers / page numbers.
-        if midY < pageRect.minY + band {
-            return .pageArtifact
-        }
-        // Side gutters: marginalia.
+        if midY > pageRect.maxY - band { return .pageArtifact }
+        if midY < pageRect.minY + band { return .pageArtifact }
         if midX < pageRect.minX + gutter || midX > pageRect.maxX - gutter {
             return .marginalia
         }
         return .bodyParagraph
+    }
+
+    /// Refined classification with heading/blockquote heuristics, applied after
+    /// the coarse zone check.
+    private func refineType(
+        for rect: CGRect,
+        transcript: String,
+        in pageRect: CGRect,
+        bodyBounds: (minX: CGFloat, maxX: CGFloat)?,
+        previous: DetectedBlock?
+    ) -> BlockType {
+        let coarse = type(for: rect, in: pageRect)
+        guard coarse == .bodyParagraph else { return coarse }
+
+        // Blockquote: indented left edge relative to the body column.
+        if let bounds = bodyBounds {
+            let bodyWidth = bounds.maxX - bounds.minX
+            let indent = rect.minX - bounds.minX
+            if bodyWidth > 0, indent > heuristics.blockquoteIndentRatio * bodyWidth {
+                return .blockquote
+            }
+        }
+
+        // Heading: short line, possibly preceded by extra vertical space.
+        // (Headings are emitted as bodyParagraph since the use-case lists them
+        // under Body Content; this heuristic is reserved for future explicit
+        // tagging, so we keep `.bodyParagraph` but with a comment hook.)
+        if transcript.count <= heuristics.headingMaxChars,
+           let prev = previous,
+           (prev.boundingRect.minY - rect.maxY) >= heuristics.headingGapRatio {
+            // Treat as a heading candidate but keep within bodyParagraph per
+            // use-case (Body Content includes headings).
+            return .bodyParagraph
+        }
+        return .bodyParagraph
+    }
+
+    /// Approximate the body text column's left/right edges by taking the most
+    /// common x-extent among non-marginal, non-artifact observations.
+    private func bodyColumnBounds(
+        of ordered: [TextObservation],
+        in pageRect: CGRect
+    ) -> (minX: CGFloat, maxX: CGFloat)? {
+        let body = ordered.filter { obs in
+            type(for: obs.boundingRect, in: pageRect) == .bodyParagraph
+        }
+        guard !body.isEmpty else { return nil }
+        let minX = body.map(\.boundingRect.minX).min() ?? pageRect.minX
+        let maxX = body.map(\.boundingRect.maxX).max() ?? pageRect.maxX
+        return (minX, maxX)
     }
 
     // MARK: - Illustration Gap Inference

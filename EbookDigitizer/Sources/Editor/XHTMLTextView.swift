@@ -84,6 +84,42 @@ final class XHTMLTextView: NSTextView {
         didChangeText()
     }
 
+    /// Scroll the editor so that the given UTF-16 `NSRange` is visible. Used by
+    /// the scroll-sync bridge when the user selects a block on the canvas.
+    func scrollToRange(_ range: NSRange) {
+        guard let layoutManager, let textContainer else { return }
+        let glyphRange = layoutManager.glyphRange(forCharacterRange: range, actualCharacterRange: nil)
+        let rect = layoutManager.boundingRect(forGlyphRange: glyphRange, in: textContainer)
+        scrollToVisible(rect.insetBy(dx: 0, dy: -8))
+    }
+
+    /// Remove every `<img>` tag whose `src` references the given asset name.
+    /// Used by use-case 7c ("To Delete") to sweep out the tag for a deleted
+    /// illustration asset.
+    func removeImageTags(referencingAssetNamed assetName: String) {
+        guard let storage = textStorage, !assetName.isEmpty else { return }
+        let needle = "<img src=\"\(assetName)\"/>"
+        storage.beginEditing()
+        // Walk backwards so removals don't invalidate later indices.
+        var location = storage.length
+        while location > 0 {
+            let searchLength = min(256, location)
+            let start = location - searchLength
+            let probe = NSRange(location: start, length: searchLength)
+            let substring = (storage.string as NSString).substring(with: probe)
+            let foundNS = (substring as NSString).range(of: needle)
+            if foundNS.location != NSNotFound {
+                let absolute = NSRange(location: start + foundNS.location, length: foundNS.length)
+                storage.replaceCharacters(in: absolute, with: "")
+                location = start + foundNS.location
+                continue
+            }
+            location = start
+        }
+        storage.endEditing()
+        didChangeText()
+    }
+
     // MARK: - Responder Chain (Shortcut Magic)
 
     /// `true` only when there is an actual editable selection to operate on.

@@ -10,6 +10,9 @@ private struct PageImageCard: View {
     var onAnnotationChange: ((UUID, CGRect) -> Void)?
     var onAnnotationCreate: ((AnnotationDraft) -> Void)?
     var onAnnotationDelete: ((UUID) -> Void)?
+    var onRotate: ((Int) -> Void)? = nil
+    var onFlip: (() -> Void)? = nil
+    var onReextract: (() -> Void)? = nil
 
     @State private var drafts: [AnnotationDraft] = []
 
@@ -48,6 +51,14 @@ private struct PageImageCard: View {
         .overlay(alignment: .topTrailing) {
             statusBadge
                 .padding(8)
+        }
+        .contextMenu {
+            Button("Rotate Left") { onRotate?(-90) }
+            Button("Rotate Right") { onRotate?(90) }
+            Divider()
+            Button("Flip Horizontal") { onFlip?() }
+            Divider()
+            Button("Force Re-Extract Page") { onReextract?() }
         }
         .onAppear { syncDrafts() }
         .onChange(of: page.blocks.map(\.id)) { syncDrafts() }
@@ -126,33 +137,80 @@ struct PageSnapshot: Identifiable {
 /// Images are sized to a configurable percentage of the window height (default
 /// 60%) so the boundary between adjacent pages is always visible, exactly as
 /// the use case specifies. Each page image carries its annotation overlay.
+///
+/// Tracks the **current page** (use-case 7b/7d): the first page entirely in
+/// view; if several are entirely in view, the first of those. Keyboard
+/// shortcuts in `ReviewWorkspaceView` operate on this page.
 struct ImageCanvasPane: View {
 
     let pages: [PageSnapshot]
     /// Height of each page card, as a fraction of the available height (0.5–0.8).
     var pageHeightFraction: CGFloat = 0.6
+    /// When set, the canvas scrolls so the page with this ID is visible. Drives
+    /// the editor -> canvas direction of scroll-sync.
+    var scrollTargetPageID: UUID? = nil
 
     var onAnnotationChange: ((UUID, CGRect) -> Void)?
     var onAnnotationCreate: ((AnnotationDraft) -> Void)?
     var onAnnotationDelete: ((UUID) -> Void)?
+    /// Emitted whenever the current (first fully-in-view) page changes.
+    var onCurrentPageChange: ((UUID) -> Void)? = nil
+    /// Per-page actions surfaced via the context menu (use-case 7c/7d).
+    var onRotatePage: ((UUID, Int) -> Void)? = nil
+    var onFlipPage: ((UUID) -> Void)? = nil
+    var onReextractPage: ((UUID) -> Void)? = nil
 
     var body: some View {
         GeometryReader { proxy in
             let cardHeight = proxy.size.height * pageHeightFraction
-            ScrollView {
-                LazyVStack(spacing: 0) {
-                    ForEach(pages) { page in
-                        PageImageCard(
-                            page: page,
-                            maxHeight: cardHeight,
-                            onAnnotationChange: onAnnotationChange,
-                            onAnnotationCreate: onAnnotationCreate,
-                            onAnnotationDelete: onAnnotationDelete
-                        )
-                        Divider()
+            ScrollViewReader { scroller in
+                ScrollView {
+                    LazyVStack(spacing: 0) {
+                        ForEach(pages) { page in
+                            PageImageCard(
+                                page: page,
+                                maxHeight: cardHeight,
+                                onAnnotationChange: onAnnotationChange,
+                                onAnnotationCreate: onAnnotationCreate,
+                                onAnnotationDelete: onAnnotationDelete,
+                                onRotate: { angle in onRotatePage?(page.id, angle) },
+                                onFlip: { onFlipPage?(page.id) },
+                                onReextract: { onReextractPage?(page.id) }
+                            )
+                            .id(page.id)
+                            Divider()
+                        }
+                    }
+                }
+                .onScrollGeometryChange(for: EquatableCurrentPageTracker.self) { geo in
+                    // Determine the first page entirely in view. Each card has a
+                    // fixed height of `cardHeight`; the first fully-visible card
+                    // is the one whose top is at or above the visible top.
+                    let cardH = cardHeight
+                    let visibleTop = geo.contentOffset.y
+                    let firstFullIndex = max(0, Int((visibleTop / cardH).rounded(.up)))
+                    let clamped = min(firstFullIndex, max(0, pages.count - 1))
+                    return EquatableCurrentPageTracker(
+                        index: clamped, id: pages[clamped].id
+                    )
+                } action: { _, tracker in
+                    onCurrentPageChange?(tracker.id)
+                }
+                .onChange(of: scrollTargetPageID) { _, newID in
+                    if let newID {
+                        withAnimation(.easeInOut(duration: 0.18)) {
+                            scroller.scrollTo(newID, anchor: .center)
+                        }
                     }
                 }
             }
         }
     }
+}
+
+/// Equatable wrapper for `onScrollGeometryChange`'s `for:` type so it only
+/// fires the action when the current-page index or ID actually changes.
+private struct EquatableCurrentPageTracker: Equatable {
+    let index: Int
+    let id: UUID
 }

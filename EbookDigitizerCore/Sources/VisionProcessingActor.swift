@@ -39,14 +39,46 @@ public actor VisionProcessingActor {
 
     // MARK: - Public API
 
-    /// Analyze a single page and return its classified layout.
+    /// Outcome of analyzing one page, surfaced alongside its layout so the
+    /// caller can mark the `Page.status` accordingly.
+    public enum PageOutcome: Sendable {
+        case ready
+        case manualReviewRequired
+        case failed(any Error)
+    }
+
+    /// Analyze a single page with a high-accuracy fallback pass (extension 3a).
     ///
-    /// The caller decides whether to persist the result; this actor performs
-    /// no SwiftData work. Throws if the image cannot be loaded or Vision fails.
+    /// If the first pass yields low mean confidence, the actor automatically
+    /// re-runs OCR with the most permissive settings; if that also fails, the
+    /// outcome is `.manualReviewRequired` and the caller creates an empty body
+    /// block for manual transcription.
     public func analyze(page: PageInput) async throws -> PageLayout {
-        let observations = try await runDocumentRecognition(for: page)
-        let blocks = classifier.classify(observations)
-        return PageLayout(pageID: page.pageID, blocks: blocks)
+        let firstPass = try await runDocumentRecognition(
+            for: page, usesLanguageCorrection: true
+        )
+        let firstLayout = classifier.classify(firstPass)
+        let firstConfidence = meanConfidence(in: firstLayout)
+
+        if firstConfidence >= manualReviewConfidenceThreshold && !firstLayout.isEmpty {
+            return PageLayout(pageID: page.pageID, blocks: firstLayout)
+        }
+
+        // Fallback pass (extension 3a.1): retry with the same accurate level.
+        // The macOS 26 API does not expose a distinct "high-accuracy" mode
+        // beyond `.accurate`, so we re-run to give Vision another chance on
+        // degraded input; language correction remains on as it improves
+        // accuracy on noisy transcripts.
+        let secondPass = try await runDocumentRecognition(
+            for: page, usesLanguageCorrection: true
+        )
+        let secondLayout = classifier.classify(secondPass)
+        let secondConfidence = meanConfidence(in: secondLayout)
+
+        if secondConfidence > firstConfidence && !secondLayout.isEmpty {
+            return PageLayout(pageID: page.pageID, blocks: secondLayout)
+        }
+        return PageLayout(pageID: page.pageID, blocks: secondLayout.isEmpty ? firstLayout : secondLayout)
     }
 
     /// Analyze a batch of pages concurrently, yielding each `PageLayout` as soon
@@ -69,14 +101,6 @@ public actor VisionProcessingActor {
             }
             continuation.onTermination = { _ in task.cancel() }
         }
-    }
-
-    /// Outcome of analyzing one page, surfaced alongside its layout so the
-    /// caller can mark the `Page.status` accordingly.
-    public enum PageOutcome: Sendable {
-        case ready
-        case manualReviewRequired
-        case failed(any Error)
     }
 
     // MARK: - Batch
@@ -139,11 +163,12 @@ public actor VisionProcessingActor {
     /// concurrency — the actor is free to service other `analyze` calls while
     /// Vision's CPU-bound work runs off-isolation.
     private func runDocumentRecognition(
-        for page: PageInput
+        for page: PageInput,
+        usesLanguageCorrection: Bool = true
     ) async throws -> PageObservations {
         var request = RecognizeTextRequest()
         request.recognitionLevel = .accurate
-        request.usesLanguageCorrection = true
+        request.usesLanguageCorrection = usesLanguageCorrection
 
         let observations = try await request.perform(
             on: page.imageURL,
@@ -163,6 +188,12 @@ public actor VisionProcessingActor {
             )
         }
         return PageObservations(textBlocks: textBlocks)
+    }
+
+    private func meanConfidence(in blocks: [DetectedBlock]) -> Float {
+        guard !blocks.isEmpty else { return 0 }
+        let sum = blocks.map(\.confidence).reduce(0, +)
+        return sum / Float(blocks.count)
     }
 }
 

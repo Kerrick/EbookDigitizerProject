@@ -61,6 +61,10 @@ struct AnnotationDraft: Identifiable, Equatable {
     var blockType: BlockType
     /// Normalized, lower-left origin bounding rect (matches `ElementBlock.boundingRect`).
     var normalizedRect: CGRect
+    /// Raw text content for text blocks; `nil` for illustrations.
+    var rawText: String?
+    /// Filesystem path to the cropped illustration asset; `nil` for text blocks.
+    var assetPath: String?
 
     /// Convenience for the overlay layer.
     func viewRect(in size: CGSize) -> CGRect {
@@ -75,7 +79,9 @@ extension ElementBlock {
             id: id,
             sequence: sequence,
             blockType: blockType,
-            normalizedRect: boundingRect
+            normalizedRect: boundingRect,
+            rawText: rawText,
+            assetPath: assetPath
         )
     }
 }

@@ -17,6 +17,13 @@ struct XHTMLTextEditor: NSViewRepresentable {
     @Binding var text: String
     var isEditable: Bool = true
 
+    /// When set, the editor scrolls so this UTF-16 NSRange is visible. Drives
+    /// the canvas -> editor direction of scroll-sync.
+    var scrollTarget: NSRange? = nil
+    /// When set, every `<img>` tag referencing this asset name is removed from
+    /// the document. Drives use-case 7c.3 (delete illustration).
+    var removeImageTagsForAsset: String? = nil
+
     /// Emitted on every settled selection change.
     var onSelectionChange: ((NSRange) -> Void)? = nil
     /// Emitted whenever the caret's enclosing line changes (drives scroll-sync).
@@ -61,6 +68,16 @@ struct XHTMLTextEditor: NSViewRepresentable {
         // Re-bind closures in case they were rebuilt with new captures.
         context.coordinator.onSelectionChange = onSelectionChange
         context.coordinator.onActiveLineChange = onActiveLineChange
+
+        // Programmatic scroll request from the canvas.
+        if let scrollTarget {
+            nsView.scrollToRange(scrollTarget)
+        }
+
+        // Programmatic `<img>` sweep for deleted illustrations.
+        if let asset = removeImageTagsForAsset, !asset.isEmpty {
+            nsView.removeImageTags(referencingAssetNamed: asset)
+        }
 
         // Reflect external text mutations (e.g. from a "Force Re-Extract"
         // command in use-case 7d) without disturbing the user's caret when the
