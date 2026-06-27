@@ -199,7 +199,8 @@ public actor VisionProcessingActor {
             return TextObservation(
                 boundingRect: observation.boundingBox.cgRect,
                 transcript: candidate.string,
-                confidence: candidate.confidence
+                confidence: candidate.confidence,
+                isTitle: observation.isTitle
             )
         }
     }

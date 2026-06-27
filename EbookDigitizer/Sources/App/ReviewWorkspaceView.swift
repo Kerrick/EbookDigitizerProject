@@ -176,18 +176,19 @@ struct ReviewWorkspaceView: View {
             .frame(minWidth: 420)
 
             XHTMLTextEditor(
-                text: Binding(
-                    get: { viewModel.documentText },
-                    set: { viewModel.documentTextDidChange(to: $0) }
-                ),
+                blocks: viewModel.renderedBlocks,
                 isEditable: !viewModel.isEditingDisabled,
-                scrollTarget: viewModel.blockIDForScrollSync
-                    .flatMap { viewModel.range(forBlockID: $0) },
+                scrollTargetBlockID: viewModel.scrollTargetBlockID,
                 removeImageTagsForAsset: viewModel.pendingAssetTagRemoval,
                 insertionFragment: viewModel.pendingInsertionFragment,
-                onActiveLineChange: { range in
-                    viewModel.editorActiveLineChanged(range)
-                }
+                onBlockTextChange: { id, text in viewModel.onBlockTextChange(id, text) },
+                onBlockSplit: { original, newID, text in
+                    viewModel.onBlockSplit(originalID: original, newID: newID, newText: text)
+                },
+                onBlockMerge: { kept, removed in
+                    viewModel.onBlockMerge(keptID: kept, removedID: removed)
+                },
+                onActiveLineChange: { range in viewModel.editorActiveLineChanged(range) }
             )
             .frame(minWidth: 380)
         }

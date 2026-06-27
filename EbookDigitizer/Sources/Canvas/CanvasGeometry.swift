@@ -65,6 +65,8 @@ struct AnnotationDraft: Identifiable, Equatable {
     var rawText: String?
     /// Filesystem path to the cropped illustration asset; `nil` for text blocks.
     var assetPath: String?
+    /// `true` when Vision identified this text as a title.
+    var isTitle: Bool = false
 
     /// Convenience for the overlay layer.
     func viewRect(in size: CGSize) -> CGRect {
@@ -81,7 +83,8 @@ extension ElementBlock {
             blockType: blockType,
             normalizedRect: boundingRect,
             rawText: rawText,
-            assetPath: assetPath
+            assetPath: assetPath,
+            isTitle: isTitle
         )
     }
 }

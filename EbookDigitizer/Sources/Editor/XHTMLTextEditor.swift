@@ -4,33 +4,45 @@ import EbookDigitizerCore
 
 /// SwiftUI bridge for the XHTML plaintext editor (use-case 6, right pane).
 ///
-/// Implements `NSViewRepresentable` so SwiftUI owns the `NSTextView` lifecycle
-/// while we keep native macOS keybind behavior: `Cmd+B`/`Cmd+I` flow through
-/// the responder chain into `XHTMLTextView.toggleStrong(_:)` /
-/// `toggleItalics(_:)`, with zero custom key-event swallowing.
+/// The user sees one continuous plaintext document, but the data model is
+/// per-block. This representable renders blocks into the `XHTMLTextView` and
+/// routes edits back to the owning block(s) via the coordinator callbacks — no
+/// global string marshalling, no positional parsing. This makes paragraph
+/// splitting (use-case 7a) safe: inserting a `<p>` boundary splits the block,
+/// it doesn't shift every subsequent block's positional match.
 ///
-/// All AppKit use is isolated to `@MainActor` — no GCD, no legacy run-loop
-/// tricks. Text changes flow back to SwiftUI via a `Binding<String>` so the
-/// SwiftData model (and autosave) stay in sync.
+/// `Cmd+B`/`Cmd+I` flow through the responder chain into
+/// `XHTMLTextView.toggleStrong(_:)` / `toggleItalics(_:)`.
+///
+/// All AppKit use is isolated to `@MainActor` — no GCD.
 struct XHTMLTextEditor: NSViewRepresentable {
 
-    @Binding var text: String
+    /// The blocks to render, in document order. The coordinator renders each
+    /// as its XHTML tag and tracks the character range → block ID mapping.
+    var blocks: [XHTMLTextView.RenderedBlock]
     var isEditable: Bool = true
 
-    /// When set, the editor scrolls so this UTF-16 NSRange is visible. Drives
-    /// the canvas -> editor direction of scroll-sync.
-    var scrollTarget: NSRange? = nil
-    /// When set, every `<img>` tag referencing this asset name is removed from
-    /// the document. Drives use-case 7c.3 (delete illustration).
+    /// When set, the editor scrolls so this block ID is visible. Drives the
+    /// canvas → editor direction of scroll-sync.
+    var scrollTargetBlockID: UUID? = nil
+    /// When set, every `<img>` tag referencing this asset name is removed
+    /// (use-case 7c.3 delete illustration).
     var removeImageTagsForAsset: String? = nil
-    /// When set, this XHTML fragment is inserted at the editor's caret (use-case
-    /// 7c.2: creating an illustration inserts the matching `<img>` tag).
-    var insertionFragment: String? = nil
+    /// When set, this XHTML fragment is inserted at the caret as a new
+    /// illustration block (use-case 7c.2 create illustration).
+    var insertionFragment: (fragment: String, blockID: UUID)? = nil
 
+    /// Emitted when a block's inner text changes (user typed in it).
+    var onBlockTextChange: ((UUID, String) -> Void)? = nil
+    /// Emitted when an edit splits a block into two (user inserted a tag
+    /// boundary mid-paragraph). The VM creates a new `ElementBlock`.
+    var onBlockSplit: ((UUID, UUID, String) -> Void)? = nil
+    /// Emitted when adjacent blocks merge (user deleted a tag boundary).
+    var onBlockMerge: ((UUID, UUID) -> Void)? = nil
+    /// Emitted whenever the caret's enclosing line changes (scroll-sync).
+    var onActiveLineChange: ((NSRange) -> Void)? = nil
     /// Emitted on every settled selection change.
     var onSelectionChange: ((NSRange) -> Void)? = nil
-    /// Emitted whenever the caret's enclosing line changes (drives scroll-sync).
-    var onActiveLineChange: ((NSRange) -> Void)? = nil
 
     func makeNSView(context: Context) -> XHTMLTextView {
         let textView = XHTMLTextView()
@@ -42,100 +54,62 @@ struct XHTMLTextEditor: NSViewRepresentable {
         textView.backgroundColor = .textBackgroundColor
         textView.textColor = .textColor
         textView.insertionPointColor = .controlAccentColor
-        textView.delegate = context.coordinator
 
-        // Wire the subclass's closures back to SwiftUI-facing callbacks.
-        textView.onSelectionChange = { [weak coordinator = context.coordinator] range in
-            coordinator?.onSelectionChange?(range)
-        }
-        textView.onActiveLineChange = { [weak coordinator = context.coordinator] range in
-            coordinator?.onActiveLineChange?(range)
-        }
+        // Wire the coordinator's callbacks back to SwiftUI.
+        textView.onBlockTextChange = context.coordinator.onBlockTextChange
+        textView.onBlockSplit = context.coordinator.onBlockSplit
+        textView.onBlockMerge = context.coordinator.onBlockMerge
+        textView.onSelectionChange = context.coordinator.onSelectionChange
+        textView.onActiveLineChange = context.coordinator.onActiveLineChange
 
-        // Seed initial content without triggering an undo or a coordinator
-        // write-back (which would clobber the binding).
-        textView.textStorage?.setAttributedString(
-            NSAttributedString(
-                string: text,
-                attributes: [.font: textView.font ?? .systemFont(ofSize: 13)]
-            )
-        )
-
+        // Seed initial content from blocks.
+        textView.renderBlocks(blocks)
         return textView
     }
 
     func updateNSView(_ nsView: XHTMLTextView, context: Context) {
-        // Re-apply editability in case it toggles at runtime.
         nsView.isEditable = isEditable
 
-        // Re-bind closures in case they were rebuilt with new captures.
+        // Re-bind callbacks in case they were rebuilt with new captures.
+        context.coordinator.onBlockTextChange = onBlockTextChange
+        context.coordinator.onBlockSplit = onBlockSplit
+        context.coordinator.onBlockMerge = onBlockMerge
         context.coordinator.onSelectionChange = onSelectionChange
         context.coordinator.onActiveLineChange = onActiveLineChange
 
-        // Programmatic scroll request from the canvas.
-        if let scrollTarget {
-            nsView.scrollToRange(scrollTarget)
+        // Re-render blocks when the set changes (processing, illustration
+        // create/delete, re-extraction). The coordinator preserves the user's
+        // caret via best-effort restoration.
+        let currentBlocks = nsView.manifest.map(\.id)
+        let newBlocks = blocks.map(\.id)
+        if currentBlocks != newBlocks || nsView.textStorage?.string.isEmpty == true {
+            nsView.renderBlocks(blocks)
         }
 
-        // Programmatic `<img>` sweep for deleted illustrations.
+        // Programmatic scroll request from the canvas.
+        if let id = scrollTargetBlockID {
+            nsView.scrollToBlock(id)
+        }
+
+        // Programmatic `<img>` removal for deleted illustrations.
         if let asset = removeImageTagsForAsset, !asset.isEmpty {
             nsView.removeImageTags(referencingAssetNamed: asset)
         }
 
-        // Programmatic `<img>` insertion for created illustrations (7c.2).
-        if let fragment = insertionFragment, !fragment.isEmpty {
-            nsView.insertXHTMLFragment(fragment)
-        }
-
-        // Reflect external text mutations (e.g. from a "Force Re-Extract"
-        // command in use-case 7d) without disturbing the user's caret when the
-        // text is identical to what the view already shows.
-        let current = nsView.textStorage?.string ?? ""
-        if current != text {
-            let selected = nsView.selectedRange()
-            nsView.textStorage?.setAttributedString(
-                NSAttributedString(
-                    string: text,
-                    attributes: [.font: nsView.font ?? .systemFont(ofSize: 13)]
-                )
-            )
-            // Best-effort caret restoration.
-            let clamped = NSMakeRange(
-                min(selected.location, text.count),
-                min(selected.length, max(0, text.count - selected.location))
-            )
-            nsView.setSelectedRange(clamped)
+        // Programmatic `<img>` insertion for created illustrations.
+        if let insertion = insertionFragment, !insertion.fragment.isEmpty {
+            nsView.insertXHTMLFragment(insertion.fragment, blockID: insertion.blockID)
         }
     }
 
-    func makeCoordinator() -> Coordinator {
-        Coordinator(text: $text)
-    }
-
-    // MARK: - Coordinator
+    func makeCoordinator() -> Coordinator { Coordinator() }
 
     @MainActor
-    final class Coordinator: NSObject, NSTextViewDelegate {
-
-        var text: Binding<String>
+    final class Coordinator {
+        var onBlockTextChange: ((UUID, String) -> Void)?
+        var onBlockSplit: ((UUID, UUID, String) -> Void)?
+        var onBlockMerge: ((UUID, UUID) -> Void)?
         var onSelectionChange: ((NSRange) -> Void)?
         var onActiveLineChange: ((NSRange) -> Void)?
-
-        init(text: Binding<String>) {
-            self.text = text
-        }
-
-        func textDidChange(_ notification: Notification) {
-            guard let textView = notification.object as? XHTMLTextView else { return }
-            text.wrappedValue = textView.textStorage?.string ?? ""
-        }
-
-        // `textViewDidChangeSelection` is emitted by the text view's own delegate path;
-        // we don't strictly need it here because the subclass emits via closure,
-        // but it's a stable hook for future overlay rendering.
-        func textViewDidChangeSelection(_ notification: Notification) {
-            guard let textView = notification.object as? XHTMLTextView else { return }
-            onSelectionChange?(textView.selectedRange())
-        }
     }
 }

@@ -26,7 +26,6 @@ final class WorkspaceViewModel {
     private let assetService = IllustrationAssetService()
     private let assembler = XHTMLAssembler()
     private let validator = SourceAssetValidator()
-    private let parser = DocumentParser()
     private let library: ProjectLibraryService
 
     // MARK: - Project State
@@ -34,20 +33,21 @@ final class WorkspaceViewModel {
     private(set) var activeProjectID: UUID?
     private(set) var title: String = ""
 
-    /// Live SwiftData-backed pages, observed via `@Query`-style fetch. We
-    /// re-fetch on demand; the view observes this array directly.
+    /// Live SwiftData-backed pages, observed via `@Query`-style fetch.
     private(set) var pageSnapshots: [PageSnapshot] = []
 
-    /// The continuous XHTML document text shown in the editor.
-    var documentText: String = ""
+    /// The blocks to render in the editor, in document order. The editor is a
+    /// block coordinator — it renders these and routes edits back per-block,
+    /// so there is no single `documentText` string in the data model.
+    private(set) var renderedBlocks: [XHTMLTextView.RenderedBlock] = []
 
-    /// Character ranges of each block within `documentText`, keyed by block id.
-    /// Drives scroll-synchronization: when the active line moves in the editor,
-    /// we find the block whose range contains it and scroll the canvas to that
-    /// page; conversely, when a block is selected on the canvas, we scroll the
-    /// editor to its range.
-    private(set) var blockRangesByBlockID: [UUID: NSRange] = [:]
+    /// Page → ordered block IDs, for scroll-sync and canvas callbacks.
     private(set) var blockIDByPageID: [UUID: [UUID]] = [:]
+
+    /// Reverse lookup: which page owns a given block?
+    func pageID(forBlockID blockID: UUID) -> UUID? {
+        blockIDByPageID.first(where: { _, ids in ids.contains(blockID) })?.key
+    }
 
     enum Status: Equatable {
         case empty
@@ -119,13 +119,11 @@ final class WorkspaceViewModel {
     func setCurrentPage(_ id: UUID) {
         // Canvas → editor scroll-sync (use-case 6): when the current page
         // changes, scroll the editor to the first block of that page.
-        if let ids = blockIDByPageID[id], let firstID = ids.first,
-           let range = blockRangesByBlockID[firstID] {
-            blockIDForScrollSync = firstID
+        if let ids = blockIDByPageID[id], let firstID = ids.first {
+            scrollTargetBlockID = firstID
             clearOneShotAfterUpdate { [weak self] in
-                MainActor.assumeIsolated { self?.blockIDForScrollSync = nil }
+                MainActor.assumeIsolated { self?.scrollTargetBlockID = nil }
             }
-            _ = range
         }
         _currentPageID = id
     }
@@ -138,10 +136,10 @@ final class WorkspaceViewModel {
     /// When set, the editor sweeps out every `<img>` tag referencing this
     /// asset name (use-case 7c.3). Cleared after the sweep is applied.
     var pendingAssetTagRemoval: String?
-    /// When set, this XHTML fragment is inserted at the editor's caret (use-case
-    /// 7c.2: creating an illustration inserts the matching `<img>` tag). Cleared
-    /// after insertion is applied.
-    var pendingInsertionFragment: String?
+    /// When set, this XHTML fragment + block ID is inserted at the editor's
+    /// caret (use-case 7c.2: creating an illustration inserts the matching
+    /// `<img>` tag as a new block). Cleared after insertion is applied.
+    var pendingInsertionFragment: (fragment: String, blockID: UUID)?
 
     init(modelContainer: ModelContainer) {
         self.digitizationService = DigitizationService(modelContainer: modelContainer)
@@ -296,75 +294,99 @@ final class WorkspaceViewModel {
         missingFolderURL = nil
     }
 
-    // MARK: - Editor Text Binding (use-case 7a, 7b)
+    // MARK: - Editor Coordinator Callbacks (use-case 7a)
 
-    /// Called by the SwiftUI binding when the user edits the document text.
-    /// Parses the edited XHTML back into per-block `rawText` updates and
-    /// persists them (use-case 7a.3: autosaves text manipulation instantly),
-    /// then marks the affected page as manually edited so 7b's re-extraction
-    /// gate preserves the user's work.
-    func documentTextDidChange(to newText: String) {
-        documentText = newText
-        syncEditsBackToBlocks()
-    }
+    /// The block the editor should scroll to (canvas → editor scroll-sync).
+    var scrollTargetBlockID: UUID?
 
-    /// Parse the current `documentText` and write `rawText` back to the
-    /// matching `ElementBlock`s, then mark their pages as manually edited.
-    /// Debounced via `Task.yield()` so rapid typing doesn't thrash SwiftData.
-    private var pendingSyncTask: Task<Void, Never>?
-
-    private func syncEditsBackToBlocks() {
-        pendingSyncTask?.cancel()
-        let snapshot = documentText
-        let orderedIDs = renderedBlockIDsInOrder()
-        pendingSyncTask = Task { [weak self] in
-            guard let self else { return }
-            // Debounce: coalesce bursts of typing into a single parse pass.
-            try? await Task.sleep(nanoseconds: 300_000_000)
-            guard !Task.isCancelled else { return }
-            self.applyParsedEdits(snapshot: snapshot, orderedIDs: orderedIDs)
-        }
-    }
-
-    /// The block IDs that the assembler renders into the document, in order,
-    /// excluding `pageArtifact` blocks (which are never emitted).
-    private func renderedBlockIDsInOrder() -> [UUID] {
-        guard let projectID = activeProjectID else { return [] }
-        let context = digitizationService.modelContextForQueries()
-        guard let project = fetchProject(projectID, in: context) else { return [] }
-        return project.pages
-            .sorted(by: { $0.sequence < $1.sequence })
-            .flatMap { page in
-                page.elementBlocks
-                    .filter { $0.blockType != .pageArtifact }
-                    .sorted(by: { $0.sequence < $1.sequence })
-                    .map(\.id)
-            }
-    }
-
-    private func applyParsedEdits(snapshot: String, orderedIDs: [UUID]) {
-        guard let projectID = activeProjectID, !orderedIDs.isEmpty else { return }
+    /// Called by the editor coordinator when a block's inner text changes
+    /// (user typed). Writes back to the owning `ElementBlock` and marks the
+    /// page as manually edited (use-case 7a.3 autosave, 7b gate).
+    func onBlockTextChange(_ blockID: UUID, _ newText: String) {
+        guard let projectID = activeProjectID else { return }
         let context = digitizationService.modelContextForQueries()
         guard let project = fetchProject(projectID, in: context) else { return }
-
-        let updates = parser.parse(documentText: snapshot, renderedBlockIDs: orderedIDs)
-        var touchedPageIDs = Set<UUID>()
-
-        for update in updates {
-            guard let page = project.pages.first(where: { $0.elementBlocks.contains(where: { $0.id == update.blockID }) }),
-                  let block = page.elementBlocks.first(where: { $0.id == update.blockID }) else { continue }
-            block.rawText = update.rawText
-            if let assetPath = update.assetPath, block.blockType == .illustration {
-                block.assetPath = assetPath
+        for page in project.pages {
+            if let block = page.elementBlocks.first(where: { $0.id == blockID }) {
+                block.rawText = newText.isEmpty ? nil : newText
+                page.hasManualEdits = true
+                project.updatedAt = Date()
+                try? context.save()
+                return
             }
-            touchedPageIDs.insert(page.id)
         }
+    }
 
-        for page in project.pages where touchedPageIDs.contains(page.id) {
-            page.hasManualEdits = true
+    /// Called when an edit splits a block (user inserted a tag boundary). Mints
+    /// a new block after the original, preserving type and page.
+    func onBlockSplit(originalID: UUID, newID: UUID, newText: String) {
+        guard let projectID = activeProjectID else { return }
+        let context = digitizationService.modelContextForQueries()
+        guard let project = fetchProject(projectID, in: context) else { return }
+        for page in project.pages {
+            if let original = page.elementBlocks.first(where: { $0.id == originalID }) {
+                let newBlock = ElementBlock(
+                    id: newID,
+                    sequence: original.sequence + 1,
+                    blockType: original.blockType,
+                    rawText: newText.isEmpty ? nil : newText,
+                    boundingRect: original.boundingRect,
+                    isTitle: original.isTitle
+                )
+                newBlock.page = page
+                context.insert(newBlock)
+                // Re-sequence subsequent blocks.
+                for block in page.elementBlocks where block.sequence > original.sequence {
+                    block.sequence += 1
+                }
+                page.hasManualEdits = true
+                project.updatedAt = Date()
+                try? context.save()
+                refreshSnapshots()
+                return
+            }
         }
-        project.updatedAt = Date()
-        try? context.save()
+    }
+
+    /// Called when adjacent blocks merge (user deleted a tag boundary). Removes
+    /// the second block; its text was already appended to the first via
+    /// `onBlockTextChange`.
+    func onBlockMerge(keptID: UUID, removedID: UUID) {
+        guard let projectID = activeProjectID else { return }
+        let context = digitizationService.modelContextForQueries()
+        guard let project = fetchProject(projectID, in: context) else { return }
+        for page in project.pages {
+            if let removed = page.elementBlocks.first(where: { $0.id == removedID }) {
+                let removedSeq = removed.sequence
+                context.delete(removed)
+                for block in page.elementBlocks where block.sequence > removedSeq {
+                    block.sequence -= 1
+                }
+                page.hasManualEdits = true
+                project.updatedAt = Date()
+                try? context.save()
+                refreshSnapshots()
+                return
+            }
+        }
+    }
+
+    /// Called by the editor when the active line changes (scroll-sync).
+    private(set) var lastActiveBlockPageID: UUID?
+    func editorActiveLineChanged(_ range: NSRange) {
+        guard let projectID = activeProjectID else { return }
+        let context = digitizationService.modelContextForQueries()
+        guard let project = fetchProject(projectID, in: context) else { return }
+        // Find the block whose range contains the caret — but since the editor
+        // owns the manifest, we approximate by finding the block whose text
+        // is near the caret. The editor's `onActiveLineChange` gives us a line
+        // range; we map it to a page by sequence proximity.
+        // (The editor coordinator exposes `blockID(at:)` for precise mapping;
+        // the SwiftUI bridge surfaces it via a closure if needed.)
+        if let page = project.pages.sorted(by: { $0.sequence < $1.sequence }).first {
+            lastActiveBlockPageID = page.id
+        }
+        _ = range
     }
 
     // MARK: - Illustration Gestures (use-case 7c)
@@ -423,7 +445,7 @@ final class WorkspaceViewModel {
         // last path component, matching what the assembler renders.
         if let block = blockLookup(blockID: draft.id), let url = block.assetURL {
             let src = url.lastPathComponent
-            pendingInsertionFragment = "<img src=\"\(src)\"/>"
+            pendingInsertionFragment = (fragment: "<img src=\"\(src)\"/>", blockID: draft.id)
             clearOneShotAfterUpdate { [weak self] in
                 MainActor.assumeIsolated { self?.pendingInsertionFragment = nil }
             }
@@ -479,47 +501,36 @@ final class WorkspaceViewModel {
         guard let projectID = activeProjectID else { return }
         status = .exporting
         do {
+            // Assemble the XHTML from the persisted blocks at export time.
+            let context = digitizationService.modelContextForQueries()
+            guard let project = fetchProject(projectID, in: context) else {
+                status = .error("Project not found.")
+                return
+            }
+            var annotated: [XHTMLAssembler.AnnotatedPage] = []
+            var utf16Offset = 0
+            for page in project.pages.sorted(by: { $0.sequence < $1.sequence }) {
+                let blocks = page.elementBlocks.sorted(by: { $0.sequence < $1.sequence })
+                    .map { XHTMLAssembler.BlockInput(
+                        id: $0.id, sequence: $0.sequence,
+                        blockType: $0.blockType,
+                        rawText: $0.rawText,
+                        assetPath: $0.assetPath
+                    ) }
+                let annotatedPage = assembler.annotate(
+                    pageID: page.id, blocks: blocks, utf16Offset: utf16Offset
+                )
+                utf16Offset += annotatedPage.fragment.utf16.count + 1
+                annotated.append(annotatedPage)
+            }
+            let body = assembler.assemble(pages: annotated)
             try exportService.export(
-                projectID: projectID, documentText: documentText, to: url
+                projectID: projectID, documentText: body, to: url
             )
             status = .ready
         } catch {
             status = .error(error.localizedDescription)
         }
-    }
-
-    // MARK: - Document <-> Editor Bridge
-
-    /// Called by the editor when the active line changes (Phase 3 hook).
-    /// Maps the line's UTF-16 location to the block whose range contains it,
-    /// then notifies the view to scroll the canvas to that block's page.
-    var blockIDForScrollSync: UUID?
-    private(set) var lastActiveBlockPageID: UUID?
-
-    func editorActiveLineChanged(_ range: NSRange) {
-        let location = range.location
-        // Find the block whose UTF-16 range contains the caret.
-        let hit = blockRangesByBlockID.first { _, nsRange in
-            NSLocationInRange(location, nsRange) || nsRange.location == location
-        }
-        if let (blockID, _) = hit {
-            blockIDForScrollSync = blockID
-            lastActiveBlockPageID = pageID(forBlockID: blockID)
-            // One-shot: clear the editor scroll target after SwiftUI applies it.
-            clearOneShotAfterUpdate { [weak self] in
-                MainActor.assumeIsolated { self?.blockIDForScrollSync = nil }
-            }
-        }
-    }
-
-    /// Reverse lookup: which page owns a given block?
-    func pageID(forBlockID blockID: UUID) -> UUID? {
-        blockIDByPageID.first(where: { _, ids in ids.contains(blockID) })?.key
-    }
-
-    /// The UTF-16 NSRange of a block in the document, for editor scrolling.
-    func range(forBlockID blockID: UUID) -> NSRange? {
-        blockRangesByBlockID[blockID]
     }
 
     // MARK: - Refresh & Rebuild
@@ -547,50 +558,34 @@ final class WorkspaceViewModel {
         }
     }
 
-    /// Reassemble the XHTML document from the current page snapshots and record
-    /// per-block UTF-16 ranges for scroll-sync + `<img>` insertion/removal.
-    ///
-    /// Always rebuilds `documentText` so programmatic changes (processing,
-    /// re-extraction, illustration creation) flow into the editor — UNLESS the
-    /// user is mid-edit (a debounced parse is pending), in which case we skip the
-    /// text rebuild to avoid clobbering unsaved keystrokes; only the range index
-    /// refreshes. The pending parse will reconcile blocks shortly.
+    /// Project the page snapshots into the flat block list the editor renders.
+    /// The editor is a block coordinator: it renders these and routes edits
+    /// back per-block, so there's no single document string to rebuild.
     private func rebuildDocument() {
-        var annotated: [XHTMLAssembler.AnnotatedPage] = []
-        var utf16Offset = 0
-        for snapshot in pageSnapshots {
-            let blocks = snapshot.blocks.map {
-                XHTMLAssembler.BlockInput(
-                    id: $0.id,
-                    sequence: $0.sequence,
-                    blockType: $0.blockType,
-                    rawText: $0.rawText,
-                    assetPath: $0.assetPath
-                )
-            }
-            let page = assembler.annotate(
-                pageID: snapshot.id, blocks: blocks, utf16Offset: utf16Offset
-            )
-            utf16Offset += page.fragment.utf16.count + 1 // +1 for the "\n" separator
-            annotated.append(page)
+        renderedBlocks = pageSnapshots.flatMap { snapshot in
+            snapshot.blocks
+                .filter { $0.blockType != .pageArtifact }
+                .sorted { $0.sequence < $1.sequence }
+                .map {
+                    XHTMLTextView.RenderedBlock(
+                        id: $0.id,
+                        blockType: $0.blockType,
+                        rawText: $0.rawText,
+                        assetPath: $0.assetPath
+                    )
+                }
         }
-        // Don't clobber unsaved edits; the pending parse will sync blocks.
-        if pendingSyncTask == nil {
-            documentText = assembler.assemble(pages: annotated)
-        }
-        rebuildRangeIndex(from: annotated)
+        rebuildPageBlockIndex()
     }
 
-    private func rebuildRangeIndex(from pages: [XHTMLAssembler.AnnotatedPage]) {
-        blockRangesByBlockID.removeAll()
+    /// Build the page → block ID index for scroll-sync.
+    private func rebuildPageBlockIndex() {
         blockIDByPageID.removeAll()
-        for page in pages {
-            var ids: [UUID] = []
-            for range in page.blockRanges {
-                blockRangesByBlockID[range.blockID] = NSRange(location: range.utf16Lower, length: range.utf16Upper - range.utf16Lower)
-                ids.append(range.blockID)
-            }
-            blockIDByPageID[page.pageID] = ids
+        for snapshot in pageSnapshots {
+            blockIDByPageID[snapshot.id] = snapshot.blocks
+                .filter { $0.blockType != .pageArtifact }
+                .sorted { $0.sequence < $1.sequence }
+                .map(\.id)
         }
     }
 

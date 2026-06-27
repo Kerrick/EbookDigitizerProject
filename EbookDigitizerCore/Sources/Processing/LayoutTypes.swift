@@ -82,6 +82,10 @@ public struct DetectedBlock: Sendable {
     public var rawText: String?
     public var confidence: Float
     public var boundingRect: CGRect
+    /// `true` when Vision identified this text as a title. Carried through so the
+    /// cross-page artifact detector can keep a real title in the body even when
+    /// its text matches a recurring running header.
+    public var isTitle: Bool
 
     public init(
         id: UUID = UUID(),
@@ -89,7 +93,8 @@ public struct DetectedBlock: Sendable {
         blockType: BlockType,
         rawText: String? = nil,
         confidence: Float = 1.0,
-        boundingRect: CGRect
+        boundingRect: CGRect,
+        isTitle: Bool = false
     ) {
         self.id = id
         self.sequence = sequence
@@ -97,6 +102,7 @@ public struct DetectedBlock: Sendable {
         self.rawText = rawText
         self.confidence = confidence
         self.boundingRect = boundingRect
+        self.isTitle = isTitle
     }
 }
 

@@ -49,13 +49,17 @@ public struct CrossPageArtifactDetector: Sendable {
         /// (units are fractions of page height, since Vision's space is
         /// normalized to `[0, 1]`).
         public let boundingRect: CGRect
+        /// Vision's own title detection — the primary signal that a body block is
+        /// a real title (kept in the flow) rather than a recurring header copy.
+        public let isTitle: Bool
 
-        public init(id: UUID, sequence: Int, blockType: BlockType, rawText: String?, boundingRect: CGRect) {
+        public init(id: UUID, sequence: Int, blockType: BlockType, rawText: String?, boundingRect: CGRect, isTitle: Bool = false) {
             self.id = id
             self.sequence = sequence
             self.blockType = blockType
             self.rawText = rawText
             self.boundingRect = boundingRect
+            self.isTitle = isTitle
         }
     }
 
@@ -127,6 +131,13 @@ public struct CrossPageArtifactDetector: Sendable {
             for block in page.blocks where block.blockType != .pageArtifact {
                 guard let text = block.rawText?.normalizedForComparison, !text.isEmpty else { continue }
                 guard let header = bestMatch(for: text, in: recurringHeaders) else { continue }
+
+                // Primary signal: Vision's `isTitle` says this is a real title.
+                // Keep it in the body even though the text matches a running
+                // header — it's the chapter heading, not the recurring header.
+                if block.isTitle {
+                    continue
+                }
 
                 let bodyFontSize = block.boundingRect.height
                 let ratio = bodyFontSize / header.medianFontSize

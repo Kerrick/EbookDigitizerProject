@@ -229,7 +229,8 @@ public final class DigitizationService {
                             sequence: block.sequence,
                             blockType: block.blockType,
                             rawText: block.rawText,
-                            boundingRect: block.boundingRect
+                            boundingRect: block.boundingRect,
+                            isTitle: block.isTitle
                         )
                     }
             )
@@ -260,7 +261,8 @@ public final class DigitizationService {
                 sequence: index,
                 blockType: detected.blockType,
                 rawText: detected.rawText,
-                boundingRect: detected.boundingRect
+                boundingRect: detected.boundingRect,
+                isTitle: detected.isTitle
             )
         }
         replaceBlocks(on: page, with: newBlocks)

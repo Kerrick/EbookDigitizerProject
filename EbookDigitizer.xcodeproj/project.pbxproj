@@ -31,7 +31,6 @@
 		C754ACC3427AFEFB80E3E59D /* EbookDigitizerCore.framework in Embed Frameworks */ = {isa = PBXBuildFile; fileRef = 33DACA70E46683C20EA03F59 /* EbookDigitizerCore.framework */; settings = {ATTRIBUTES = (CodeSignOnCopy, RemoveHeadersOnCopy, ); }; };
 		CC475ADF32A7A688AC7D99D1 /* AppCommands.swift in Sources */ = {isa = PBXBuildFile; fileRef = F4B7D6D1AE3857068715BC84 /* AppCommands.swift */; };
 		D6951343DE207393E4359F72 /* EbookDigitizerApp.swift in Sources */ = {isa = PBXBuildFile; fileRef = 3F45E5FD099E2F02C6109CA5 /* EbookDigitizerApp.swift */; };
-		D95B30FA1D1B0961979EA4CC /* DocumentParser.swift in Sources */ = {isa = PBXBuildFile; fileRef = AB4E165454F1D23CAACE75FF /* DocumentParser.swift */; };
 		E16D69D4BD08AFC52658B8A2 /* EbookDigitizerCore.framework in Frameworks */ = {isa = PBXBuildFile; fileRef = 33DACA70E46683C20EA03F59 /* EbookDigitizerCore.framework */; };
 		E88E55E2732CE6EE04527451 /* DigitizationService.swift in Sources */ = {isa = PBXBuildFile; fileRef = B0E2FA9264A9A7B38863FB89 /* DigitizationService.swift */; };
 		E98ADEDCFBEC74F705A811DE /* LayoutClassifier.swift in Sources */ = {isa = PBXBuildFile; fileRef = 26E05611C048EC6D6ED721D5 /* LayoutClassifier.swift */; };
@@ -82,7 +81,6 @@
 		A509A713F1E94044E7741631 /* ProjectLibraryService.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = ProjectLibraryService.swift; sourceTree = "<group>"; };
 		A51D6B78564D527BAC5AB607 /* CrossPageArtifactDetector.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = CrossPageArtifactDetector.swift; sourceTree = "<group>"; };
 		A62E7DB01C345643BF08DDB5 /* XHTMLAssembler.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = XHTMLAssembler.swift; sourceTree = "<group>"; };
-		AB4E165454F1D23CAACE75FF /* DocumentParser.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = DocumentParser.swift; sourceTree = "<group>"; };
 		B0E2FA9264A9A7B38863FB89 /* DigitizationService.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = DigitizationService.swift; sourceTree = "<group>"; };
 		C0EAA4ECC67EF2C86534DFE3 /* ExportService.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = ExportService.swift; sourceTree = "<group>"; };
 		C16FA4AB46499D628824C6C5 /* VisionProcessingActor.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = VisionProcessingActor.swift; sourceTree = "<group>"; };
@@ -188,7 +186,6 @@
 			isa = PBXGroup;
 			children = (
 				B0E2FA9264A9A7B38863FB89 /* DigitizationService.swift */,
-				AB4E165454F1D23CAACE75FF /* DocumentParser.swift */,
 				C0EAA4ECC67EF2C86534DFE3 /* ExportService.swift */,
 				82BA27E6970BEDB5A69F4AFC /* IllustrationAssetService.swift */,
 				2A7610A5747DAAA762C0C6D1 /* ImageFolderIngestor.swift */,
@@ -312,7 +309,6 @@
 				CC475ADF32A7A688AC7D99D1 /* AppCommands.swift in Sources */,
 				0A00CF86FCAA96E091CEDD29 /* CanvasGeometry.swift in Sources */,
 				E88E55E2732CE6EE04527451 /* DigitizationService.swift in Sources */,
-				D95B30FA1D1B0961979EA4CC /* DocumentParser.swift in Sources */,
 				D6951343DE207393E4359F72 /* EbookDigitizerApp.swift in Sources */,
 				1698566DD37225C3D92A6B1A /* ExportService.swift in Sources */,
 				F5441352736BBBEFD21B0CE9 /* IllustrationAssetService.swift in Sources */,

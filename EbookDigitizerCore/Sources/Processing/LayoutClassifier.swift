@@ -66,11 +66,16 @@ public struct TextObservation: Sendable {
     public let boundingRect: CGRect
     public let transcript: String
     public let confidence: Float
+    /// Vision's own title detection (macOS 26): `true` when Vision believes this
+    /// text is a heading/title rather than body content. A first-class signal for
+    /// distinguishing real chapter titles from recurring running headers.
+    public let isTitle: Bool
 
-    public init(boundingRect: CGRect, transcript: String, confidence: Float) {
+    public init(boundingRect: CGRect, transcript: String, confidence: Float, isTitle: Bool = false) {
         self.boundingRect = boundingRect
         self.transcript = transcript
         self.confidence = confidence
+        self.isTitle = isTitle
     }
 }
 
@@ -149,7 +154,8 @@ struct LayoutClassifier {
                 blockType: blockType,
                 rawText: text.transcript,
                 confidence: text.confidence,
-                boundingRect: text.boundingRect
+                boundingRect: text.boundingRect,
+                isTitle: text.isTitle
             ))
             _ = index
             sequence += 1

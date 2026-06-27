@@ -60,6 +60,12 @@ public final class ElementBlock {
     /// Bounding-box height, in normalized source-image coordinate space.
     public var height: Double
 
+    /// `true` when Vision identified this text as a title (use-case: keep real
+    /// chapter titles in the body even when their text matches a recurring
+    /// running header). Persisted so the cross-page detector can run after a
+    /// relaunch without re-running Vision.
+    public var isTitle: Bool
+
     /// The full bounding rectangle, reconstructed from the persisted
     /// primitive `Double` components.
     public var boundingRect: CGRect {
@@ -85,7 +91,8 @@ public final class ElementBlock {
         blockType: BlockType,
         rawText: String? = nil,
         assetURL: URL? = nil,
-        boundingRect: CGRect = .zero
+        boundingRect: CGRect = .zero,
+        isTitle: Bool = false
     ) {
         self.id = id
         self.sequence = sequence
@@ -96,5 +103,6 @@ public final class ElementBlock {
         self.originY = boundingRect.origin.y
         self.width = boundingRect.size.width
         self.height = boundingRect.size.height
+        self.isTitle = isTitle
     }
 }
