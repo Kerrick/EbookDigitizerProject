@@ -6,7 +6,7 @@ targets:
   EbookDigitizerCore:
     type: framework
     platform: macOS
-    deploymentTarget: "15.0"
+    deploymentTarget: "26.0"
     sources:
       - EbookDigitizerCore/Sources
     settings:
@@ -17,7 +17,7 @@ targets:
   EbookDigitizer:
     type: application
     platform: macOS
-    deploymentTarget: "15.0"
+    deploymentTarget: "26.0"
     sources:
       - EbookDigitizer/Sources
     dependencies:
