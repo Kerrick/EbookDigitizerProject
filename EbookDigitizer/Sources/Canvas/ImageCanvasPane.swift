@@ -149,6 +149,8 @@ struct ImageCanvasPane: View {
     /// When set, the canvas scrolls so the page with this ID is visible. Drives
     /// the editor -> canvas direction of scroll-sync.
     var scrollTargetPageID: UUID? = nil
+    /// When the user adjusts the height slider (use-case 6: configurable %).
+    var onPageHeightFractionChange: ((CGFloat) -> Void)? = nil
 
     var onAnnotationChange: ((UUID, CGRect) -> Void)?
     var onAnnotationCreate: ((AnnotationDraft) -> Void)?
@@ -161,50 +163,69 @@ struct ImageCanvasPane: View {
     var onReextractPage: ((UUID) -> Void)? = nil
 
     var body: some View {
-        GeometryReader { proxy in
-            let cardHeight = proxy.size.height * pageHeightFraction
-            ScrollViewReader { scroller in
-                ScrollView {
-                    LazyVStack(spacing: 0) {
-                        ForEach(pages) { page in
-                            PageImageCard(
-                                page: page,
-                                maxHeight: cardHeight,
-                                onAnnotationChange: onAnnotationChange,
-                                onAnnotationCreate: onAnnotationCreate,
-                                onAnnotationDelete: onAnnotationDelete,
-                                onRotate: { angle in onRotatePage?(page.id, angle) },
-                                onFlip: { onFlipPage?(page.id) },
-                                onReextract: { onReextractPage?(page.id) }
-                            )
-                            .id(page.id)
-                            Divider()
+        VStack(spacing: 0) {
+            GeometryReader { proxy in
+                let cardHeight = proxy.size.height * pageHeightFraction
+                ScrollViewReader { scroller in
+                    ScrollView {
+                        LazyVStack(spacing: 0) {
+                            ForEach(pages) { page in
+                                PageImageCard(
+                                    page: page,
+                                    maxHeight: cardHeight,
+                                    onAnnotationChange: onAnnotationChange,
+                                    onAnnotationCreate: onAnnotationCreate,
+                                    onAnnotationDelete: onAnnotationDelete,
+                                    onRotate: { angle in onRotatePage?(page.id, angle) },
+                                    onFlip: { onFlipPage?(page.id) },
+                                    onReextract: { onReextractPage?(page.id) }
+                                )
+                                .id(page.id)
+                                Divider()
+                            }
                         }
                     }
-                }
-                .onScrollGeometryChange(for: EquatableCurrentPageTracker.self) { geo in
-                    // Determine the first page entirely in view. Each card has a
-                    // fixed height of `cardHeight`; the first fully-visible card
-                    // is the one whose top is at or above the visible top.
-                    let cardH = cardHeight
-                    let visibleTop = geo.contentOffset.y
-                    let firstFullIndex = max(0, Int((visibleTop / cardH).rounded(.up)))
-                    let clamped = min(firstFullIndex, max(0, pages.count - 1))
-                    return EquatableCurrentPageTracker(
-                        index: clamped, id: pages[clamped].id
-                    )
-                } action: { _, tracker in
-                    onCurrentPageChange?(tracker.id)
-                }
-                .onChange(of: scrollTargetPageID) { _, newID in
-                    if let newID {
-                        withAnimation(.easeInOut(duration: 0.18)) {
-                            scroller.scrollTo(newID, anchor: .center)
+                    .onScrollGeometryChange(for: EquatableCurrentPageTracker.self) { geo in
+                        let cardH = cardHeight
+                        let visibleTop = geo.contentOffset.y
+                        let firstFullIndex = max(0, Int((visibleTop / cardH).rounded(.up)))
+                        let clamped = min(firstFullIndex, max(0, pages.count - 1))
+                        return EquatableCurrentPageTracker(
+                            index: clamped, id: pages[clamped].id
+                        )
+                    } action: { _, tracker in
+                        onCurrentPageChange?(tracker.id)
+                    }
+                    .onChange(of: scrollTargetPageID) { _, newID in
+                        if let newID {
+                            withAnimation(.easeInOut(duration: 0.18)) {
+                                scroller.scrollTo(newID, anchor: .center)
+                            }
                         }
                     }
                 }
             }
+            heightSlider
         }
+    }
+
+    /// Configurable image-height slider (use-case 6: 50–80% of window height).
+    private var heightSlider: some View {
+        HStack(spacing: 8) {
+            Image(systemName: "photo")
+                .foregroundStyle(.secondary)
+            Slider(value: Binding(
+                get: { Double(pageHeightFraction) },
+                set: { onPageHeightFractionChange?(CGFloat($0)) }
+            ), in: 0.5...0.8)
+            Text("\(Int(pageHeightFraction * 100))%")
+                .font(.caption.monospacedDigit())
+                .foregroundStyle(.secondary)
+                .frame(width: 38, alignment: .trailing)
+        }
+        .padding(.horizontal, 12)
+        .padding(.vertical, 6)
+        .background(.regularMaterial)
     }
 }
 

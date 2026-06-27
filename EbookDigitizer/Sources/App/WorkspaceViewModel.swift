@@ -27,6 +27,7 @@ final class WorkspaceViewModel {
     private let assembler = XHTMLAssembler()
     private let validator = SourceAssetValidator()
     private let parser = DocumentParser()
+    private let library: ProjectLibraryService
 
     // MARK: - Project State
 
@@ -58,6 +59,45 @@ final class WorkspaceViewModel {
     }
     private(set) var status: Status = .empty
 
+    /// Projects persisted on disk, shown in the empty state (use-case step 2).
+    private(set) var recentProjects: [ProjectSummary] = []
+
+    /// Lightweight summary of a persisted project for the recent-projects list.
+    struct ProjectSummary: Identifiable, Sendable {
+        let id: UUID
+        let title: String
+        let updatedAt: Date
+        let pageCount: Int
+    }
+
+    /// Load the recent-projects list for the empty state.
+    func loadRecentProjects() {
+        recentProjects = library.recentProjects().map { project in
+            ProjectSummary(
+                id: project.id,
+                title: project.title,
+                updatedAt: project.updatedAt,
+                pageCount: project.pages.count
+            )
+        }
+    }
+
+    /// Open an existing project by ID (launch recovery). Restores the page
+    /// snapshots, validates source integrity (use-case 6a), and rebuilds the
+    /// document. Does NOT re-run processing; existing block data is preserved.
+    func openProject(_ id: UUID) {
+        guard let project = library.open(projectID: id) else {
+            status = .error("Project could not be opened.")
+            return
+        }
+        activeProjectID = project.id
+        title = project.title
+        refreshSnapshots()
+        validateSourceIntegrity()
+        rebuildDocument()
+        status = missingFolderURL == nil ? .ready : .empty
+    }
+
     /// When non-nil, the project's source folder is missing (use-case 6a) and
     /// editing is disabled until the Producer re-locates it.
     var missingFolderURL: URL?
@@ -69,7 +109,24 @@ final class WorkspaceViewModel {
     var currentPageID: UUID? { _currentPageID }
     private var _currentPageID: UUID?
 
+    /// Configurable image-card height fraction (use-case 6: 50–80% of window).
+    var pageHeightFraction: CGFloat = 0.6
+
+    func setPageHeightFraction(_ value: CGFloat) {
+        pageHeightFraction = min(0.8, max(0.5, value))
+    }
+
     func setCurrentPage(_ id: UUID) {
+        // Canvas → editor scroll-sync (use-case 6): when the current page
+        // changes, scroll the editor to the first block of that page.
+        if let ids = blockIDByPageID[id], let firstID = ids.first,
+           let range = blockRangesByBlockID[firstID] {
+            blockIDForScrollSync = firstID
+            clearOneShotAfterUpdate { [weak self] in
+                MainActor.assumeIsolated { self?.blockIDForScrollSync = nil }
+            }
+            _ = range
+        }
         _currentPageID = id
     }
 
@@ -81,11 +138,20 @@ final class WorkspaceViewModel {
     /// When set, the editor sweeps out every `<img>` tag referencing this
     /// asset name (use-case 7c.3). Cleared after the sweep is applied.
     var pendingAssetTagRemoval: String?
+    /// When set, this XHTML fragment is inserted at the editor's caret (use-case
+    /// 7c.2: creating an illustration inserts the matching `<img>` tag). Cleared
+    /// after insertion is applied.
+    var pendingInsertionFragment: String?
 
     init(modelContainer: ModelContainer) {
         self.digitizationService = DigitizationService(modelContainer: modelContainer)
         self.exportService = ExportService(modelContainer: modelContainer)
+        self.library = ProjectLibraryService(modelContainer: modelContainer)
     }
+
+    // MARK: - Launch Recovery (use-case step 2, minimal guarantee 2)
+
+    /// Recent projects for the empty-state 
 
     // MARK: - Ingestion (use-case step 1, 2)
 
@@ -346,13 +412,35 @@ final class WorkspaceViewModel {
     }
 
     /// Called when the user creates a new illustration box: crop the asset,
-    /// persist the block, and insert a matching `<img>` tag into the document
-    /// flow at the correct sequence position.
+    /// persist the block, and queue a matching `<img>` tag insertion into the
+    /// editor at the caret (use-case 7c.2).
     func createIllustration(
         pageID: UUID,
         draft: AnnotationDraft
     ) {
         commitIllustration(pageID: pageID, blockID: draft.id, normalizedRect: draft.normalizedRect)
+        // Queue the `<img>` tag insertion. The asset name is the cropped file's
+        // last path component, matching what the assembler renders.
+        if let block = blockLookup(blockID: draft.id), let url = block.assetURL {
+            let src = url.lastPathComponent
+            pendingInsertionFragment = "<img src=\"\(src)\"/>"
+            clearOneShotAfterUpdate { [weak self] in
+                MainActor.assumeIsolated { self?.pendingInsertionFragment = nil }
+            }
+        }
+    }
+
+    /// Look up a block by ID across all pages (for asset-name resolution).
+    private func blockLookup(blockID: UUID) -> ElementBlock? {
+        guard let projectID = activeProjectID else { return nil }
+        let context = digitizationService.modelContextForQueries()
+        guard let project = fetchProject(projectID, in: context) else { return nil }
+        for page in project.pages {
+            if let block = page.elementBlocks.first(where: { $0.id == blockID }) {
+                return block
+            }
+        }
+        return nil
     }
 
     /// Called when the user deletes an illustration box: delete the asset from
@@ -462,10 +550,11 @@ final class WorkspaceViewModel {
     /// Reassemble the XHTML document from the current page snapshots and record
     /// per-block UTF-16 ranges for scroll-sync + `<img>` insertion/removal.
     ///
-    /// Guarded: if the user has manually edited any page (use-case 7b), the
-    /// document text is preserved as-is so the system never clobbers the
-    /// Producer's work; only the range index is rebuilt so scroll-sync keeps
-    /// working as best it can against the (possibly edited) text.
+    /// Always rebuilds `documentText` so programmatic changes (processing,
+    /// re-extraction, illustration creation) flow into the editor — UNLESS the
+    /// user is mid-edit (a debounced parse is pending), in which case we skip the
+    /// text rebuild to avoid clobbering unsaved keystrokes; only the range index
+    /// refreshes. The pending parse will reconcile blocks shortly.
     private func rebuildDocument() {
         var annotated: [XHTMLAssembler.AnnotatedPage] = []
         var utf16Offset = 0
@@ -485,22 +574,11 @@ final class WorkspaceViewModel {
             utf16Offset += page.fragment.utf16.count + 1 // +1 for the "\n" separator
             annotated.append(page)
         }
-
-        // Don't clobber user edits (use-case 7b). During initial processing
-        // (before any edit) this guard is inert; after the user edits, the
-        // live `documentText` is the source of truth for export.
-        if !anyPageHasManualEdits {
+        // Don't clobber unsaved edits; the pending parse will sync blocks.
+        if pendingSyncTask == nil {
             documentText = assembler.assemble(pages: annotated)
         }
         rebuildRangeIndex(from: annotated)
-    }
-
-    /// True if any page on disk has `hasManualEdits == true`.
-    private var anyPageHasManualEdits: Bool {
-        guard let projectID = activeProjectID else { return false }
-        let context = digitizationService.modelContextForQueries()
-        guard let project = fetchProject(projectID, in: context) else { return false }
-        return project.pages.contains { $0.hasManualEdits }
     }
 
     private func rebuildRangeIndex(from pages: [XHTMLAssembler.AnnotatedPage]) {
@@ -519,9 +597,15 @@ final class WorkspaceViewModel {
     // MARK: - Helpers
 
     private func assetURL(for blockID: UUID, in projectID: UUID) -> URL {
-        let dir = FileManager.default.temporaryDirectory
-            .appendingPathComponent("EbookDigitizer-Assets", isDirectory: true)
+        // Persist cropped assets under Application Support (not the temp dir) so
+        // they survive app relaunch and honor minimal guarantee #2.
+        let base = FileManager.default.urls(for: .applicationSupportDirectory, in: .userDomainMask)
+            .first ?? FileManager.default.temporaryDirectory
+        let dir = base
+            .appendingPathComponent("EbookDigitizer", isDirectory: true)
+            .appendingPathComponent("Assets", isDirectory: true)
             .appendingPathComponent(projectID.uuidString, isDirectory: true)
+        try? FileManager.default.createDirectory(at: dir, withIntermediateDirectories: true)
         return dir.appendingPathComponent("\(blockID.uuidString).png")
     }
 

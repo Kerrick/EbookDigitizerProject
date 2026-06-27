@@ -34,5 +34,8 @@ struct EbookDigitizerApp: App {
                 .frame(minWidth: 1000, minHeight: 650)
         }
         .modelContainer(modelContainer)
+        .commands {
+            AppCommands(viewModel: viewModel)
+        }
     }
 }

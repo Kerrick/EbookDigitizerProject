@@ -23,6 +23,9 @@ struct XHTMLTextEditor: NSViewRepresentable {
     /// When set, every `<img>` tag referencing this asset name is removed from
     /// the document. Drives use-case 7c.3 (delete illustration).
     var removeImageTagsForAsset: String? = nil
+    /// When set, this XHTML fragment is inserted at the editor's caret (use-case
+    /// 7c.2: creating an illustration inserts the matching `<img>` tag).
+    var insertionFragment: String? = nil
 
     /// Emitted on every settled selection change.
     var onSelectionChange: ((NSRange) -> Void)? = nil
@@ -77,6 +80,11 @@ struct XHTMLTextEditor: NSViewRepresentable {
         // Programmatic `<img>` sweep for deleted illustrations.
         if let asset = removeImageTagsForAsset, !asset.isEmpty {
             nsView.removeImageTags(referencingAssetNamed: asset)
+        }
+
+        // Programmatic `<img>` insertion for created illustrations (7c.2).
+        if let fragment = insertionFragment, !fragment.isEmpty {
+            nsView.insertXHTMLFragment(fragment)
         }
 
         // Reflect external text mutations (e.g. from a "Force Re-Extract"

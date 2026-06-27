@@ -166,6 +166,25 @@ public actor VisionProcessingActor {
         for page: PageInput,
         usesLanguageCorrection: Bool = true
     ) async throws -> PageObservations {
+        // Run text recognition and rectangle detection concurrently using
+        // `async let` — pure structured concurrency, both off the actor's
+        // executor, no GCD.
+        async let textObs = runTextRecognition(
+            for: page, usesLanguageCorrection: usesLanguageCorrection
+        )
+        async let rectObs = runRectangleDetection(for: page)
+
+        let (textBlocks, illustrationRects) = try await (textObs, rectObs)
+        return PageObservations(
+            textBlocks: textBlocks,
+            detectedIllustrationRects: illustrationRects
+        )
+    }
+
+    private func runTextRecognition(
+        for page: PageInput,
+        usesLanguageCorrection: Bool
+    ) async throws -> [TextObservation] {
         var request = RecognizeTextRequest()
         request.recognitionLevel = .accurate
         request.usesLanguageCorrection = usesLanguageCorrection
@@ -175,19 +194,32 @@ public actor VisionProcessingActor {
             orientation: page.orientation.cgImagePropertyOrientation
         )
 
-        let textBlocks = observations.compactMap { observation -> TextObservation? in
+        return observations.compactMap { observation -> TextObservation? in
             guard let candidate = observation.topCandidates(1).first else { return nil }
             return TextObservation(
-                // Vision's `NormalizedRect` uses a lower-left origin in
-                // `[0, 1]` space. We preserve that coordinate space verbatim;
-                // the UI layer is responsible for flipping to Core Animation's
-                // top-left origin when rendering.
                 boundingRect: observation.boundingBox.cgRect,
                 transcript: candidate.string,
                 confidence: candidate.confidence
             )
         }
-        return PageObservations(textBlocks: textBlocks)
+    }
+
+    /// Detect rectangular graphical regions (figures, plates, embedded images)
+    /// to isolate non-text illustrations (use-case step 5). Tuned for the wide
+    /// aspect ratios typical of book illustrations.
+    private func runRectangleDetection(for page: PageInput) async throws -> [CGRect] {
+        var request = DetectRectanglesRequest()
+        request.minimumAspectRatio = 0.2
+        request.maximumAspectRatio = 5.0
+        request.minimumSize = 0.05
+        request.minimumConfidence = 0.6
+        request.maximumObservations = 12
+
+        let observations = try await request.perform(
+            on: page.imageURL,
+            orientation: page.orientation.cgImagePropertyOrientation
+        )
+        return observations.map { $0.boundingBox.cgRect }
     }
 
     private func meanConfidence(in blocks: [DetectedBlock]) -> Float {

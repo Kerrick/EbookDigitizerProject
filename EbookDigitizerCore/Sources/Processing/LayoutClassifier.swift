@@ -78,11 +78,20 @@ public struct TextObservation: Sendable {
 public struct PageObservations: Sendable {
     /// All text observations, in reading order (top-to-bottom, then left-to-right).
     public let textBlocks: [TextObservation]
+    /// Rectangular graphical regions detected by Vision (e.g. figures, plates,
+    /// embedded images). Combined with the gap-inference heuristic to isolate
+    /// non-text illustrations (use-case step 5).
+    public let detectedIllustrationRects: [CGRect]
     /// The full bounding rectangle of the page in normalized coordinates.
     public let pageRect: CGRect
 
-    public init(textBlocks: [TextObservation], pageRect: CGRect = CGRect(x: 0, y: 0, width: 1, height: 1)) {
+    public init(
+        textBlocks: [TextObservation],
+        detectedIllustrationRects: [CGRect] = [],
+        pageRect: CGRect = CGRect(x: 0, y: 0, width: 1, height: 1)
+    ) {
         self.textBlocks = textBlocks
+        self.detectedIllustrationRects = detectedIllustrationRects
         self.pageRect = pageRect
     }
 }
@@ -146,9 +155,15 @@ struct LayoutClassifier {
             sequence += 1
         }
 
-        // Illustrations are inferred from the gaps between (and around) the
-        // classified text blocks, then interleaved into reading order.
-        let illustrations = illustrationGaps(amongst: classified, pageRect: observations.pageRect)
+        // Illustrations are detected two ways: (1) Vision's
+        // `DetectRectanglesRequest` finds rectangular graphical regions directly;
+        // (2) the gap heuristic infers empty bands between text. We union both,
+        // deduplicating overlaps, then interleave into reading order.
+        let inferredGaps = illustrationGaps(amongst: classified, pageRect: observations.pageRect)
+        let illustrations = mergeIllustrations(
+            detected: observations.detectedIllustrationRects,
+            inferred: inferredGaps
+        )
         var merged = classified
         for illustration in illustrations {
             // Insert each illustration at the correct reading-order index based
@@ -231,6 +246,38 @@ struct LayoutClassifier {
         let minX = body.map(\.boundingRect.minX).min() ?? pageRect.minX
         let maxX = body.map(\.boundingRect.maxX).max() ?? pageRect.maxX
         return (minX, maxX)
+    }
+
+    // MARK: - Illustration Merging
+
+    /// Union detected and inferred illustration rects, dropping any that overlap
+    /// existing text blocks (a true illustration contains no text).
+    private func mergeIllustrations(
+        detected: [CGRect],
+        inferred: [DetectedBlock]
+    ) -> [DetectedBlock] {
+        let inferredRects = inferred.map { $0.boundingRect }
+        var combined = detected + inferredRects
+        // Deduplicate near-identical rects (detected often overlaps inferred).
+        var deduped: [CGRect] = []
+        for rect in combined {
+            let alreadyCovered = deduped.contains { existing in
+                rect.intersects(existing)
+            }
+            if !alreadyCovered {
+                deduped.append(rect)
+            }
+        }
+        combined = deduped
+        return combined.enumerated().map { index, rect in
+            DetectedBlock(
+                sequence: index,
+                blockType: .illustration,
+                rawText: nil,
+                confidence: 1.0,
+                boundingRect: rect
+            )
+        }
     }
 
     // MARK: - Illustration Gap Inference

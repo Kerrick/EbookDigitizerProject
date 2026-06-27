@@ -18,6 +18,7 @@
 		497E5F730E282693333F5D84 /* SourceAssetValidator.swift in Sources */ = {isa = PBXBuildFile; fileRef = E62E1A271FC42EA27B10CE68 /* SourceAssetValidator.swift */; };
 		4E54CD1F0139BCEF5C864E17 /* VisionProcessingActor.swift in Sources */ = {isa = PBXBuildFile; fileRef = C16FA4AB46499D628824C6C5 /* VisionProcessingActor.swift */; };
 		6BE03F8535759C9F9B7FE9D0 /* XHTMLAssembler.swift in Sources */ = {isa = PBXBuildFile; fileRef = A62E7DB01C345643BF08DDB5 /* XHTMLAssembler.swift */; };
+		6D7D17DD595D84D0DD67DEA0 /* ProjectLibraryService.swift in Sources */ = {isa = PBXBuildFile; fileRef = A509A713F1E94044E7741631 /* ProjectLibraryService.swift */; };
 		6E2F26AF051A148028A44C73 /* Page.swift in Sources */ = {isa = PBXBuildFile; fileRef = 4E634B3F7AAE59B84C27BFBF /* Page.swift */; };
 		74AB524A4FE35F17CB4790F1 /* ReviewWorkspaceView.swift in Sources */ = {isa = PBXBuildFile; fileRef = FB7AC2611A3CC9C149572864 /* ReviewWorkspaceView.swift */; };
 		79EF74ED4AFF58D709EFAB13 /* ImageCanvasPane.swift in Sources */ = {isa = PBXBuildFile; fileRef = CEDF27490F68DAB74D28E7FB /* ImageCanvasPane.swift */; };
@@ -28,6 +29,7 @@
 		AF00BF6C8F72B1E8B55829CA /* WorkspaceViewModel.swift in Sources */ = {isa = PBXBuildFile; fileRef = 9EF931C0CA4CC1D9797AD35D /* WorkspaceViewModel.swift */; };
 		C16473B2AEDC91E9BEC89C55 /* AnnotationOverlay.swift in Sources */ = {isa = PBXBuildFile; fileRef = 106CEF04B0058F5B9C5BE995 /* AnnotationOverlay.swift */; };
 		C754ACC3427AFEFB80E3E59D /* EbookDigitizerCore.framework in Embed Frameworks */ = {isa = PBXBuildFile; fileRef = 33DACA70E46683C20EA03F59 /* EbookDigitizerCore.framework */; settings = {ATTRIBUTES = (CodeSignOnCopy, RemoveHeadersOnCopy, ); }; };
+		CC475ADF32A7A688AC7D99D1 /* AppCommands.swift in Sources */ = {isa = PBXBuildFile; fileRef = F4B7D6D1AE3857068715BC84 /* AppCommands.swift */; };
 		D6951343DE207393E4359F72 /* EbookDigitizerApp.swift in Sources */ = {isa = PBXBuildFile; fileRef = 3F45E5FD099E2F02C6109CA5 /* EbookDigitizerApp.swift */; };
 		D95B30FA1D1B0961979EA4CC /* DocumentParser.swift in Sources */ = {isa = PBXBuildFile; fileRef = AB4E165454F1D23CAACE75FF /* DocumentParser.swift */; };
 		E16D69D4BD08AFC52658B8A2 /* EbookDigitizerCore.framework in Frameworks */ = {isa = PBXBuildFile; fileRef = 33DACA70E46683C20EA03F59 /* EbookDigitizerCore.framework */; };
@@ -77,6 +79,7 @@
 		82BA27E6970BEDB5A69F4AFC /* IllustrationAssetService.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = IllustrationAssetService.swift; sourceTree = "<group>"; };
 		9EF931C0CA4CC1D9797AD35D /* WorkspaceViewModel.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = WorkspaceViewModel.swift; sourceTree = "<group>"; };
 		9F7C12F491B157E4B952987F /* CanvasGeometry.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = CanvasGeometry.swift; sourceTree = "<group>"; };
+		A509A713F1E94044E7741631 /* ProjectLibraryService.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = ProjectLibraryService.swift; sourceTree = "<group>"; };
 		A51D6B78564D527BAC5AB607 /* CrossPageArtifactDetector.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = CrossPageArtifactDetector.swift; sourceTree = "<group>"; };
 		A62E7DB01C345643BF08DDB5 /* XHTMLAssembler.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = XHTMLAssembler.swift; sourceTree = "<group>"; };
 		AB4E165454F1D23CAACE75FF /* DocumentParser.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = DocumentParser.swift; sourceTree = "<group>"; };
@@ -86,6 +89,7 @@
 		CEDF27490F68DAB74D28E7FB /* ImageCanvasPane.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = ImageCanvasPane.swift; sourceTree = "<group>"; };
 		E62E1A271FC42EA27B10CE68 /* SourceAssetValidator.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = SourceAssetValidator.swift; sourceTree = "<group>"; };
 		F310D2F74CD378506FE38237 /* BlockType.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = BlockType.swift; sourceTree = "<group>"; };
+		F4B7D6D1AE3857068715BC84 /* AppCommands.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = AppCommands.swift; sourceTree = "<group>"; };
 		FB7AC2611A3CC9C149572864 /* ReviewWorkspaceView.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = ReviewWorkspaceView.swift; sourceTree = "<group>"; };
 /* End PBXFileReference section */
 
@@ -123,6 +127,7 @@
 		19CDEC870A175A38D0740120 /* App */ = {
 			isa = PBXGroup;
 			children = (
+				F4B7D6D1AE3857068715BC84 /* AppCommands.swift */,
 				FB7AC2611A3CC9C149572864 /* ReviewWorkspaceView.swift */,
 				9EF931C0CA4CC1D9797AD35D /* WorkspaceViewModel.swift */,
 			);
@@ -187,6 +192,7 @@
 				C0EAA4ECC67EF2C86534DFE3 /* ExportService.swift */,
 				82BA27E6970BEDB5A69F4AFC /* IllustrationAssetService.swift */,
 				2A7610A5747DAAA762C0C6D1 /* ImageFolderIngestor.swift */,
+				A509A713F1E94044E7741631 /* ProjectLibraryService.swift */,
 				E62E1A271FC42EA27B10CE68 /* SourceAssetValidator.swift */,
 				A62E7DB01C345643BF08DDB5 /* XHTMLAssembler.swift */,
 			);
@@ -303,6 +309,7 @@
 			buildActionMask = 2147483647;
 			files = (
 				C16473B2AEDC91E9BEC89C55 /* AnnotationOverlay.swift in Sources */,
+				CC475ADF32A7A688AC7D99D1 /* AppCommands.swift in Sources */,
 				0A00CF86FCAA96E091CEDD29 /* CanvasGeometry.swift in Sources */,
 				E88E55E2732CE6EE04527451 /* DigitizationService.swift in Sources */,
 				D95B30FA1D1B0961979EA4CC /* DocumentParser.swift in Sources */,
@@ -311,6 +318,7 @@
 				F5441352736BBBEFD21B0CE9 /* IllustrationAssetService.swift in Sources */,
 				79EF74ED4AFF58D709EFAB13 /* ImageCanvasPane.swift in Sources */,
 				909FF9BBB67826C889B11FBB /* ImageFolderIngestor.swift in Sources */,
+				6D7D17DD595D84D0DD67DEA0 /* ProjectLibraryService.swift in Sources */,
 				74AB524A4FE35F17CB4790F1 /* ReviewWorkspaceView.swift in Sources */,
 				497E5F730E282693333F5D84 /* SourceAssetValidator.swift in Sources */,
 				AF00BF6C8F72B1E8B55829CA /* WorkspaceViewModel.swift in Sources */,

@@ -15,6 +15,7 @@ struct ReviewWorkspaceView: View {
     @State private var showingFolderImporter = false
     @State private var showingRelocateImporter = false
     @State private var showingSavePanel = false
+    @State private var showingCompletionGate = false
     @State private var pendingProjectTitle = ""
 
     init(viewModel: WorkspaceViewModel) {
@@ -24,22 +25,31 @@ struct ReviewWorkspaceView: View {
     var body: some View {
         Group {
             if viewModel.status == .empty {
-                EmptyStateView { title in
-                    pendingProjectTitle = title
-                    showingFolderImporter = true
-                }
+                EmptyStateView(
+                    recentProjects: viewModel.recentProjects,
+                    onChoose: { title in
+                        pendingProjectTitle = title
+                        showingFolderImporter = true
+                    },
+                    onOpen: { id in viewModel.openProject(id) }
+                )
+                .onAppear { viewModel.loadRecentProjects() }
             } else {
                 dualPane
             }
         }
         .toolbar {
             ToolbarItemGroup(placement: .primaryAction) {
-                Button("Bold") {}
-                    .keyboardShortcut("b", modifiers: .command)
-                    .disabled(viewModel.status != .ready)
-                Button("Italic") {}
-                    .keyboardShortcut("i", modifiers: .command)
-                    .disabled(viewModel.status != .ready)
+                Button("Bold") {
+                    sendEditorAction(#selector(XHTMLTextView.toggleStrong(_:)))
+                }
+                .keyboardShortcut("b", modifiers: .command)
+                .disabled(viewModel.status != .ready)
+                Button("Italic") {
+                    sendEditorAction(#selector(XHTMLTextView.toggleItalics(_:)))
+                }
+                .keyboardShortcut("i", modifiers: .command)
+                .disabled(viewModel.status != .ready)
                 Divider()
                 Menu("Orientation") {
                     Button("Rotate Left") {
@@ -65,7 +75,7 @@ struct ReviewWorkspaceView: View {
                     }
                 }
                 .keyboardShortcut("r", modifiers: [.command, .shift])
-                Button("Export…") { showingSavePanel = true }
+                Button("Export…") { showingCompletionGate = true }
                     .disabled(viewModel.activeProjectID == nil)
             }
         }
@@ -103,6 +113,14 @@ struct ReviewWorkspaceView: View {
                 viewModel.setError(error.localizedDescription)
             }
         }
+        .sheet(isPresented: $showingCompletionGate) {
+            CompletionGateView(viewModel: viewModel) {
+                showingCompletionGate = false
+                showingSavePanel = true
+            } onCancel: {
+                showingCompletionGate = false
+            }
+        }
         .sheet(isPresented: $showingSavePanel) {
             ExportSheet { fileName in
                 saveUsingPanel(fileName: fileName)
@@ -129,8 +147,9 @@ struct ReviewWorkspaceView: View {
         HSplitView {
             ImageCanvasPane(
                 pages: viewModel.pageSnapshots,
-                pageHeightFraction: 0.6,
+                pageHeightFraction: viewModel.pageHeightFraction,
                 scrollTargetPageID: viewModel.lastActiveBlockPageID,
+                onPageHeightFractionChange: { value in viewModel.setPageHeightFraction(value) },
                 onAnnotationChange: { blockID, rect in
                     if let pageID = viewModel.pageID(forBlockID: blockID) {
                         viewModel.commitIllustration(
@@ -165,6 +184,7 @@ struct ReviewWorkspaceView: View {
                 scrollTarget: viewModel.blockIDForScrollSync
                     .flatMap { viewModel.range(forBlockID: $0) },
                 removeImageTagsForAsset: viewModel.pendingAssetTagRemoval,
+                insertionFragment: viewModel.pendingInsertionFragment,
                 onActiveLineChange: { range in
                     viewModel.editorActiveLineChanged(range)
                 }
@@ -203,6 +223,14 @@ struct ReviewWorkspaceView: View {
 
     // MARK: - Export
 
+    /// Send a selector up the responder chain to the focused `XHTMLTextView`
+    /// (use-case 7a.2: toolbar buttons trigger the same wrap macros as the
+    /// keyboard shortcuts, via the native responder chain).
+    @MainActor
+    private func sendEditorAction(_ selector: Selector) {
+        NSApp.sendAction(selector, to: nil, from: nil)
+    }
+
     private func saveUsingPanel(fileName: String) {
         let panel = NSSavePanel()
         panel.nameFieldStringValue = "\(fileName).xhtml"
@@ -216,32 +244,118 @@ struct ReviewWorkspaceView: View {
 // MARK: - Empty State
 
 private struct EmptyStateView: View {
-    @State private var title: String = "Untitled Book"
+    let recentProjects: [WorkspaceViewModel.ProjectSummary]
     var onChoose: (String) -> Void
+    var onOpen: (UUID) -> Void
+    @State private var title: String = "Untitled Book"
 
     var body: some View {
-        VStack(spacing: 24) {
-            Image(systemName: "books.vertical")
-                .font(.system(size: 56))
-                .foregroundStyle(.tint)
-            Text("Digitize a Book")
-                .font(.largeTitle.bold())
-            Text("Choose a folder of sequential scanned page images to begin.")
-                .foregroundStyle(.secondary)
-                .multilineTextAlignment(.center)
-            TextField("Book Title", text: $title)
-                .textFieldStyle(.roundedBorder)
-                .frame(maxWidth: 320)
-            Button {
-                onChoose(title)
-            } label: {
-                Label("Choose Folder…", systemImage: "folder")
-                    .padding(.horizontal, 8)
+        HStack(alignment: .top, spacing: 48) {
+            VStack(spacing: 24) {
+                Image(systemName: "books.vertical")
+                    .font(.system(size: 48))
+                    .foregroundStyle(.tint)
+                Text("Digitize a Book")
+                    .font(.title.bold())
+                Text("Choose a folder of sequential scanned page images to begin.")
+                    .foregroundStyle(.secondary)
+                    .multilineTextAlignment(.center)
+                TextField("Book Title", text: $title)
+                    .textFieldStyle(.roundedBorder)
+                    .frame(maxWidth: 280)
+                Button {
+                    onChoose(title)
+                } label: {
+                    Label("Choose Folder…", systemImage: "folder")
+                        .padding(.horizontal, 8)
+                }
+                .buttonStyle(.borderedProminent)
             }
-            .buttonStyle(.borderedProminent)
+            .padding(48)
+            .frame(maxWidth: .infinity, maxHeight: .infinity)
+
+            if !recentProjects.isEmpty {
+                VStack(alignment: .leading, spacing: 12) {
+                    Text("Recent Projects")
+                        .font(.headline)
+                    List(recentProjects) { project in
+                        Button {
+                            onOpen(project.id)
+                        } label: {
+                            VStack(alignment: .leading) {
+                                Text(project.title).font(.body)
+                                Text("\(project.pageCount) pages • \(project.updatedAt.formatted(.relative(presentation: .named)))")
+                                    .font(.caption)
+                                    .foregroundStyle(.secondary)
+                            }
+                        }
+                        .buttonStyle(.plain)
+                    }
+                }
+                .padding(24)
+                .frame(maxWidth: 280, maxHeight: .infinity, alignment: .top)
+                .background(.regularMaterial)
+            }
         }
-        .padding(48)
         .frame(maxWidth: .infinity, maxHeight: .infinity)
+    }
+}
+
+// MARK: - Completion Gate (use-case step 8)
+
+private struct CompletionGateView: View {
+    let viewModel: WorkspaceViewModel
+    var onConfirm: () -> Void
+    var onCancel: () -> Void
+
+    private var unreviewed: [PageSnapshot] {
+        viewModel.pageSnapshots.filter { $0.status != .ready }
+    }
+
+    var body: some View {
+        VStack(alignment: .leading, spacing: 16) {
+            Text("Confirm Completion")
+                .font(.headline)
+            if unreviewed.isEmpty {
+                Text("All pages are ready for export. Confirm to proceed.")
+                    .foregroundStyle(.secondary)
+            } else {
+                Text("\(unreviewed.count) page(s) are not yet ready:")
+                    .font(.callout)
+                List(unreviewed) { page in
+                    HStack {
+                        Text("Page \(page.sequence + 1)")
+                        Spacer()
+                        Text(page.status.displayName)
+                            .foregroundStyle(.secondary)
+                    }
+                }
+                .frame(maxHeight: 200)
+                Text("You can still export, but these pages may be incomplete.")
+                    .font(.caption)
+                    .foregroundStyle(.secondary)
+            }
+            HStack {
+                Spacer()
+                Button("Cancel", action: onCancel)
+                    .keyboardShortcut(.cancelAction)
+                Button("Export Anyway", action: onConfirm)
+                    .keyboardShortcut(.defaultAction)
+                    .buttonStyle(.borderedProminent)
+            }
+        }
+        .padding(24)
+        .frame(minWidth: 420)
+    }
+}
+
+extension PageStatus {
+    var displayName: String {
+        switch self {
+        case .processing: "Processing"
+        case .ready: "Ready"
+        case .manualReviewRequired: "Manual Review Required"
+        }
     }
 }
 
