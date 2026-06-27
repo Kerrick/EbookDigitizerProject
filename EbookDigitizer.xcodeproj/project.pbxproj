@@ -7,7 +7,11 @@
 	objects = {
 
 /* Begin PBXBuildFile section */
+		0B435710D2497C6B00EC8ACD /* BlockType.swift in Sources */ = {isa = PBXBuildFile; fileRef = F310D2F74CD378506FE38237 /* BlockType.swift */; };
+		0BB4045814F24287550A1CCC /* ElementBlock.swift in Sources */ = {isa = PBXBuildFile; fileRef = 239460DA29CB64CDB9A0620B /* ElementBlock.swift */; };
 		4E54CD1F0139BCEF5C864E17 /* VisionProcessingActor.swift in Sources */ = {isa = PBXBuildFile; fileRef = C16FA4AB46499D628824C6C5 /* VisionProcessingActor.swift */; };
+		6E2F26AF051A148028A44C73 /* Page.swift in Sources */ = {isa = PBXBuildFile; fileRef = 4E634B3F7AAE59B84C27BFBF /* Page.swift */; };
+		91A01C2B4FBF665F8FD0223A /* Project.swift in Sources */ = {isa = PBXBuildFile; fileRef = 4D57EA0C252E51E3F4C43950 /* Project.swift */; };
 		C754ACC3427AFEFB80E3E59D /* EbookDigitizerCore.framework in Embed Frameworks */ = {isa = PBXBuildFile; fileRef = 33DACA70E46683C20EA03F59 /* EbookDigitizerCore.framework */; settings = {ATTRIBUTES = (CodeSignOnCopy, RemoveHeadersOnCopy, ); }; };
 		D6951343DE207393E4359F72 /* EbookDigitizerApp.swift in Sources */ = {isa = PBXBuildFile; fileRef = 3F45E5FD099E2F02C6109CA5 /* EbookDigitizerApp.swift */; };
 		E16D69D4BD08AFC52658B8A2 /* EbookDigitizerCore.framework in Frameworks */ = {isa = PBXBuildFile; fileRef = 33DACA70E46683C20EA03F59 /* EbookDigitizerCore.framework */; };
@@ -38,10 +42,14 @@
 /* End PBXCopyFilesBuildPhase section */
 
 /* Begin PBXFileReference section */
+		239460DA29CB64CDB9A0620B /* ElementBlock.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = ElementBlock.swift; sourceTree = "<group>"; };
 		33DACA70E46683C20EA03F59 /* EbookDigitizerCore.framework */ = {isa = PBXFileReference; explicitFileType = wrapper.framework; includeInIndex = 0; path = EbookDigitizerCore.framework; sourceTree = BUILT_PRODUCTS_DIR; };
 		3F45E5FD099E2F02C6109CA5 /* EbookDigitizerApp.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = EbookDigitizerApp.swift; sourceTree = "<group>"; };
+		4D57EA0C252E51E3F4C43950 /* Project.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = Project.swift; sourceTree = "<group>"; };
+		4E634B3F7AAE59B84C27BFBF /* Page.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = Page.swift; sourceTree = "<group>"; };
 		7763059A5D9C52FC1EE3CD87 /* EbookDigitizer.app */ = {isa = PBXFileReference; explicitFileType = wrapper.application; includeInIndex = 0; path = EbookDigitizer.app; sourceTree = BUILT_PRODUCTS_DIR; };
 		C16FA4AB46499D628824C6C5 /* VisionProcessingActor.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = VisionProcessingActor.swift; sourceTree = "<group>"; };
+		F310D2F74CD378506FE38237 /* BlockType.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = BlockType.swift; sourceTree = "<group>"; };
 /* End PBXFileReference section */
 
 /* Begin PBXFrameworksBuildPhase section */
@@ -73,10 +81,22 @@
 			name = Products;
 			sourceTree = "<group>";
 		};
+		5E8D90A84846AF65A5B4DAFB /* Models */ = {
+			isa = PBXGroup;
+			children = (
+				F310D2F74CD378506FE38237 /* BlockType.swift */,
+				239460DA29CB64CDB9A0620B /* ElementBlock.swift */,
+				4E634B3F7AAE59B84C27BFBF /* Page.swift */,
+				4D57EA0C252E51E3F4C43950 /* Project.swift */,
+			);
+			path = Models;
+			sourceTree = "<group>";
+		};
 		6EA32FE5415D274A75CE61C5 /* Sources */ = {
 			isa = PBXGroup;
 			children = (
 				C16FA4AB46499D628824C6C5 /* VisionProcessingActor.swift */,
+				5E8D90A84846AF65A5B4DAFB /* Models */,
 			);
 			path = Sources;
 			sourceTree = "<group>";
@@ -190,6 +210,10 @@
 			isa = PBXSourcesBuildPhase;
 			buildActionMask = 2147483647;
 			files = (
+				0B435710D2497C6B00EC8ACD /* BlockType.swift in Sources */,
+				0BB4045814F24287550A1CCC /* ElementBlock.swift in Sources */,
+				6E2F26AF051A148028A44C73 /* Page.swift in Sources */,
+				91A01C2B4FBF665F8FD0223A /* Project.swift in Sources */,
 				4E54CD1F0139BCEF5C864E17 /* VisionProcessingActor.swift in Sources */,
 			);
 			runOnlyForDeploymentPostprocessing = 0;
