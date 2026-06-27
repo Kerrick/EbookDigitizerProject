@@ -1,0 +1,29 @@
+name: EbookDigitizer
+options:
+  bundleIdPrefix: com.ebookdigitizer
+  createIntermediateGroups: true
+targets:
+  EbookDigitizerCore:
+    type: framework
+    platform: macOS
+    deploymentTarget: "15.0"
+    sources:
+      - EbookDigitizerCore/Sources
+    settings:
+      base:
+        SWIFT_VERSION: "6.0"
+        GENERATE_INFOPLIST_FILE: "YES"
+        
+  EbookDigitizer:
+    type: application
+    platform: macOS
+    deploymentTarget: "15.0"
+    sources:
+      - EbookDigitizer/Sources
+    dependencies:
+      - target: EbookDigitizerCore
+    settings:
+      base:
+        SWIFT_VERSION: "6.0"
+        CODE_SIGN_ENTITLEMENTS: "EbookDigitizer/EbookDigitizer.entitlements"
+        GENERATE_INFOPLIST_FILE: "YES"
